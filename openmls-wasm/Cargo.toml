@@ -1,11 +1,11 @@
 [package]
 name = "openmls-wasm"
 version = "0.1.0"
-authors = ["OpenMLS Authors"]
+authors = ["OpenMLS Authors", "Torln"]
 edition = "2021"
 license = "MIT"
 readme = "README.md"
-repository = "https://github.com/openmls/openmls/tree/main/openmls-wasm"
+repository = "https://github.com/torlnapp/openmls/tree/main/openmls-wasm"
 publish = false
 
 [lib]

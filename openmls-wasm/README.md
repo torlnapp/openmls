@@ -1,4 +1,4 @@
-# OpenMLS Wasm Bindings Experiment
+# OpenMLS Wasm Bindings Experiment (Modified by Torln)
 
 This repo is a step on the way to proper Wasm support for OpenMLS.
 The main goals are:
