@@ -93,7 +93,7 @@ impl Identity {
         })
     }
 
-    pub fn key_package(&self, provider: &Provider) -> KeyPackage {
+    pub fn get_key_package(&self, provider: &Provider) -> KeyPackage {
         KeyPackage(
             OpenMlsKeyPackage::builder()
                 .build(
@@ -106,6 +106,10 @@ impl Identity {
                 .key_package()
                 .clone(),
         )
+    }
+
+    pub fn get_public_key_bytes(&self) -> Vec<u8> {
+        self.keypair.public().to_vec()
     }
 
     /// Export the keypair as bytes for backup/recovery purposes
@@ -357,6 +361,13 @@ impl std::error::Error for NoWelcomeError {}
 pub struct KeyPackage(OpenMlsKeyPackage);
 
 #[wasm_bindgen]
+impl KeyPackage {
+    pub fn to_bytes(&self) -> Result<Vec<u8>, JsError> {
+        Ok(self.0.tls_serialize_detached()?)
+    }
+}
+
+#[wasm_bindgen]
 pub struct RatchetTree(RatchetTreeIn);
 
 fn mls_message_to_uint8array(msg: &MlsMessageOut) -> Uint8Array {
@@ -399,7 +410,7 @@ mod tests {
 
         let mut chess_club_alice = Group::create_new(&alice_provider, &alice, "chess club");
 
-        let bob_key_pkg = bob.key_package(&bob_provider);
+        let bob_key_pkg = bob.get_key_package(&bob_provider);
 
         let add_msgs = chess_club_alice
             .native_propose_and_commit_add(&alice_provider, &alice, &bob_key_pkg)
@@ -511,8 +522,8 @@ mod tests {
             .unwrap();
 
         // Verify that both identities have the same public key
-        let key_pkg1 = alice1.key_package(&provider1);
-        let key_pkg2 = alice2.key_package(&provider2);
+        let key_pkg1 = alice1.get_key_package(&provider1);
+        let key_pkg2 = alice2.get_key_package(&provider2);
 
         let pub_key1 = key_pkg1
             .0
@@ -552,7 +563,7 @@ mod tests {
             .unwrap();
 
         // Alice adds Bob to the group
-        let bob_key_pkg = bob.key_package(&bob_provider);
+        let bob_key_pkg = bob.get_key_package(&bob_provider);
         let add_msgs = chess_club
             .native_propose_and_commit_add(&alice_provider1, &alice1, &bob_key_pkg)
             .map_err(js_error_to_string)
@@ -574,14 +585,14 @@ mod tests {
             .unwrap();
 
         // Verify recovered identity has the same public key
-        let key_pkg1 = alice1.key_package(&alice_provider1);
+        let key_pkg1 = alice1.get_key_package(&alice_provider1);
         let pub_key1 = key_pkg1
             .0
             .leaf_node()
             .signature_key()
             .as_slice();
         
-        let key_pkg2 = alice2.key_package(&alice_provider2);
+        let key_pkg2 = alice2.get_key_package(&alice_provider2);
         let pub_key2 = key_pkg2
             .0
             .leaf_node()
