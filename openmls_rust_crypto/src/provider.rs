@@ -50,6 +50,18 @@ impl Default for RustCrypto {
     }
 }
 
+impl RustCrypto {
+    /// Create a new RustCrypto with a seed for deterministic random number generation.
+    /// The seed must be exactly 32 bytes.
+    pub fn with_seed(seed: &[u8]) -> Self {
+        let mut seed_array = [0u8; 32];
+        seed_array.copy_from_slice(seed);
+        Self {
+            rng: RwLock::new(rand_chacha::ChaCha20Rng::from_seed(seed_array)),
+        }
+    }
+}
+
 #[inline(always)]
 fn kem_mode(kem: HpkeKemType) -> hpke_types::KemAlgorithm {
     match kem {

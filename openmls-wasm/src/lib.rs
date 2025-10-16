@@ -46,9 +46,20 @@ impl AsMut<OpenMlsRustCrypto> for Provider {
 
 #[wasm_bindgen]
 impl Provider {
+    /// Create a new Provider with random key generation.
     #[wasm_bindgen(constructor)]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Create a new Provider with a seed for deterministic key generation.
+    #[wasm_bindgen(js_name = fromSeed)]
+    pub fn from_seed(seed: &[u8]) -> Result<Self, JsError> {
+        if seed.len() != 32 {
+            return Err(JsError::new("Seed must be exactly 32 bytes"));
+        }
+        let provider = OpenMlsRustCrypto::with_seed(seed);
+        Ok(Self(provider))
     }
 }
 
@@ -66,11 +77,16 @@ pub struct Identity {
 #[wasm_bindgen]
 impl Identity {
     #[wasm_bindgen(constructor)]
-    pub fn new(provider: &Provider, name: &str) -> Result<Identity, JsError> {
+    pub fn create(provider: &Provider, name: &str, keypair_bytes: Option<Vec<u8>>) -> Result<Identity, JsError> {
         let signature_scheme = SignatureScheme::ED25519;
         let identity = name.bytes().collect();
         let credential = BasicCredential::new(identity);
-        let keypair = SignatureKeyPair::new(signature_scheme)?;
+
+        let keypair = if let Some(bytes) = keypair_bytes {
+            SignatureKeyPair::tls_deserialize(&mut bytes.as_slice())?
+        } else {
+            SignatureKeyPair::new(signature_scheme)?
+        };
 
         keypair.store(provider.0.storage())?;
 
@@ -98,6 +114,11 @@ impl Identity {
                 .key_package()
                 .clone(),
         )
+    }
+
+    /// Export the keypair as bytes for backup/recovery purposes
+    pub fn export_keypair_bytes(&self) -> Result<Vec<u8>, JsError> {
+        Ok(self.keypair.tls_serialize_detached()?)
     }
 }
 
@@ -306,10 +327,13 @@ impl Group {
     }
 
     fn native_join(provider: &Provider, mut welcome: &[u8], ratchet_tree: RatchetTree) -> Group {
-        let welcome = MlsMessageIn::tls_deserialize(&mut welcome)
+        let welcome = match MlsMessageIn::tls_deserialize(&mut welcome)
             .unwrap()
-            .into_welcome()
-            .expect("expected a message of type welcome");
+            .extract()
+        {
+            MlsMessageBodyIn::Welcome(welcome) => welcome,
+            _ => panic!("expected a message of type welcome"),
+        };
         let config = MlsGroupJoinConfig::builder().build();
         let mls_group = StagedWelcome::new_from_welcome(
             provider.as_ref(),
@@ -374,10 +398,10 @@ mod tests {
         let mut alice_provider = Provider::new();
         let bob_provider = Provider::new();
 
-        let alice = Identity::new(&alice_provider, "alice")
+        let alice = Identity::create(&alice_provider, "alice", None)
             .map_err(js_error_to_string)
             .unwrap();
-        let bob = Identity::new(&bob_provider, "bob")
+        let bob = Identity::create(&bob_provider, "bob", None)
             .map_err(js_error_to_string)
             .unwrap();
 
@@ -443,5 +467,150 @@ mod tests {
             .unwrap();
 
         assert_eq!(alice_msg, bob_msg);
+    }
+
+    #[test]
+    fn provider_with_seed() {
+        let seed = [42u8; 32];
+        
+        let provider1 = OpenMlsRustCrypto::with_seed(&seed);
+        let provider2 = OpenMlsRustCrypto::with_seed(&seed);
+
+        use openmls_traits::random::OpenMlsRand;
+        let buf1: [u8; 32] = provider1.rand().random_array().unwrap();
+        let buf2: [u8; 32] = provider2.rand().random_array().unwrap();
+
+        assert_eq!(buf1, buf2);
+    }
+
+    #[test]
+    fn provider_with_different_seeds() {
+        let seed1 = [42u8; 32];
+        let seed2 = [43u8; 32];
+        
+        let provider1 = OpenMlsRustCrypto::with_seed(&seed1);
+        let provider2 = OpenMlsRustCrypto::with_seed(&seed2);
+
+        use openmls_traits::random::OpenMlsRand;
+        let buf1: [u8; 32] = provider1.rand().random_array().unwrap();
+        let buf2: [u8; 32] = provider2.rand().random_array().unwrap();
+
+        assert_ne!(buf1, buf2);
+    }
+
+    #[test]
+    fn identity_recovery_with_existing_keypair() {
+        // Create an initial identity with a new keypair
+        let provider1 = Provider::new();
+        let alice1 = Identity::create(&provider1, "alice", None)
+            .map_err(js_error_to_string)
+            .unwrap();
+
+        // Export the keypair
+        let keypair_bytes = alice1
+            .export_keypair_bytes()
+            .map_err(js_error_to_string)
+            .unwrap();
+
+        // Simulate recovery: create a new provider and restore identity with the exported keypair
+        let provider2 = Provider::new();
+        let alice2 = Identity::create(&provider2, "alice", Some(keypair_bytes))
+            .map_err(js_error_to_string)
+            .unwrap();
+
+        // Verify that both identities have the same public key
+        let key_pkg1 = alice1.key_package(&provider1);
+        let key_pkg2 = alice2.key_package(&provider2);
+
+        let pub_key1 = key_pkg1
+            .0
+            .leaf_node()
+            .signature_key()
+            .as_slice();
+        let pub_key2 = key_pkg2
+            .0
+            .leaf_node()
+            .signature_key()
+            .as_slice();
+
+        assert_eq!(pub_key1, pub_key2, "Public keys should match after recovery");
+    }
+
+    #[test]
+    fn identity_recovery_and_group_operations() {
+        // Create Alice with original identity
+        let mut alice_provider1 = Provider::new();
+        let alice1 = Identity::create(&alice_provider1, "alice", None)
+            .map_err(js_error_to_string)
+            .unwrap();
+
+        // Export Alice's keypair
+        let alice_keypair_bytes = alice1
+            .export_keypair_bytes()
+            .map_err(js_error_to_string)
+            .unwrap();
+
+        // Alice creates a group
+        let mut chess_club = Group::create_new(&alice_provider1, &alice1, "chess club");
+
+        // Create Bob
+        let mut bob_provider = Provider::new();
+        let bob = Identity::create(&bob_provider, "bob", None)
+            .map_err(js_error_to_string)
+            .unwrap();
+
+        // Alice adds Bob to the group
+        let bob_key_pkg = bob.key_package(&bob_provider);
+        let add_msgs = chess_club
+            .native_propose_and_commit_add(&alice_provider1, &alice1, &bob_key_pkg)
+            .map_err(js_error_to_string)
+            .unwrap();
+
+        chess_club
+            .merge_pending_commit(&mut alice_provider1)
+            .map_err(js_error_to_string)
+            .unwrap();
+
+        // Bob joins the group
+        let ratchet_tree = chess_club.export_ratchet_tree();
+        let mut chess_club_bob = Group::native_join(&bob_provider, &add_msgs.welcome, ratchet_tree);
+
+        // Simulate Alice recovering her identity from keypair
+        let alice_provider2 = Provider::new();
+        let alice2 = Identity::create(&alice_provider2, "alice", Some(alice_keypair_bytes))
+            .map_err(js_error_to_string)
+            .unwrap();
+
+        // Verify recovered identity has the same public key
+        let key_pkg1 = alice1.key_package(&alice_provider1);
+        let pub_key1 = key_pkg1
+            .0
+            .leaf_node()
+            .signature_key()
+            .as_slice();
+        
+        let key_pkg2 = alice2.key_package(&alice_provider2);
+        let pub_key2 = key_pkg2
+            .0
+            .leaf_node()
+            .signature_key()
+            .as_slice();
+
+        assert_eq!(pub_key1, pub_key2, "Recovered identity should have same public key");
+
+        // Alice sends a message using original identity
+        let alice_msg = "hello from alice!".as_bytes();
+        let msg_out = chess_club
+            .create_message(&alice_provider1, &alice1, alice_msg)
+            .map_err(js_error_to_string)
+            .unwrap();
+
+        // Bob should be able to process the message
+        let received_msg = chess_club_bob
+            .process_message(&mut bob_provider, &msg_out)
+            .map_err(js_error_to_string)
+            .unwrap();
+
+        assert_eq!(alice_msg, received_msg, "Bob should receive Alice's message correctly");
     }
 }

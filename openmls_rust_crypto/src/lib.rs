@@ -35,3 +35,14 @@ impl OpenMlsProvider for OpenMlsRustCrypto {
         &self.crypto
     }
 }
+
+impl OpenMlsRustCrypto {
+    /// Create a new OpenMlsRustCrypto with a seed for deterministic random number generation.
+    /// The seed must be exactly 32 bytes.
+    pub fn with_seed(seed: &[u8]) -> Self {
+        Self {
+            crypto: RustCrypto::with_seed(seed),
+            key_store: MemoryStorage::default(),
+        }
+    }
+}
