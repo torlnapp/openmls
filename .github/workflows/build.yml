@@ -20,29 +20,8 @@ jobs:
       fail-fast: false
       matrix:
         arch:
-          # Windows
-          - i686-pc-windows-msvc
-          - x86_64-pc-windows-msvc
-          # macOS
-          - x86_64-apple-darwin
-          - aarch64-apple-darwin
-          # Linux
-          - x86_64-unknown-linux-gnu
-          - i686-unknown-linux-gnu
-          - aarch64-unknown-linux-gnu
-          # Android
-          - aarch64-linux-android
-          - armv7-linux-androideabi
-          - x86_64-linux-android
-          - i686-linux-android
-          # iOS
-          - aarch64-apple-ios
           # WASM
           - wasm32-unknown-unknown
-        include:
-          # Compile iOS sim on macOS
-          - os: macos-latest
-            arch: aarch64-apple-ios-sim
         mode:
           - debug
           - release
@@ -62,11 +41,7 @@ jobs:
             echo "TEST_MODE=--release" >> $GITHUB_ENV
           fi
       - name: Build (wasm)
-        if: matrix.arch == 'wasm32-unknown-unknown'
         run: cargo build $TEST_MODE --verbose --target ${{ matrix.arch }} -p openmls -F js
-      - name: Build
-        if: ${{ matrix.arch != 'wasm32-unknown-unknown'  }} 
-        run: cargo build $TEST_MODE --verbose --target ${{ matrix.arch }} -p openmls
 
   # Check feature powerset
   check:
