@@ -46,26 +46,18 @@ impl AsMut<OpenMlsRustCrypto> for Provider {
 
 #[wasm_bindgen]
 impl Provider {
-    /// Create a new Provider with random key generation.
     #[wasm_bindgen(constructor)]
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Create a new Provider with a seed for deterministic key generation.
-    #[wasm_bindgen(js_name = fromSeed)]
-    pub fn from_seed(seed: &[u8]) -> Result<Self, JsError> {
-        if seed.len() != 32 {
-            return Err(JsError::new("Seed must be exactly 32 bytes"));
+    pub fn create(seed: Option<Vec<u8>>) -> Result<Self, JsError> {
+        if let Some(seed_vec) = seed {
+            if seed_vec.len() != 32 {
+                return Err(JsError::new("Seed must be exactly 32 bytes"));
+            }
+            let provider = OpenMlsRustCrypto::with_seed(&seed_vec);
+            Ok(Self(provider))
+        } else {
+            Ok(Self::default())
         }
-        let provider = OpenMlsRustCrypto::with_seed(seed);
-        Ok(Self(provider))
     }
-}
-
-#[wasm_bindgen]
-pub fn greet() {
-    alert("Hello, openmls!");
 }
 
 #[wasm_bindgen]
@@ -395,8 +387,8 @@ mod tests {
     }
 
     fn create_group_alice_and_bob() -> (Provider, Identity, Group, Provider, Identity, Group) {
-        let mut alice_provider = Provider::new();
-        let bob_provider = Provider::new();
+        let mut alice_provider = Provider::create(None).unwrap();
+        let bob_provider = Provider::create(None).unwrap();
 
         let alice = Identity::create(&alice_provider, "alice", None)
             .map_err(js_error_to_string)
@@ -501,7 +493,7 @@ mod tests {
     #[test]
     fn identity_recovery_with_existing_keypair() {
         // Create an initial identity with a new keypair
-        let provider1 = Provider::new();
+        let provider1 = Provider::create(None).unwrap();
         let alice1 = Identity::create(&provider1, "alice", None)
             .map_err(js_error_to_string)
             .unwrap();
@@ -513,7 +505,7 @@ mod tests {
             .unwrap();
 
         // Simulate recovery: create a new provider and restore identity with the exported keypair
-        let provider2 = Provider::new();
+        let provider2 = Provider::create(None).unwrap();
         let alice2 = Identity::create(&provider2, "alice", Some(keypair_bytes))
             .map_err(js_error_to_string)
             .unwrap();
@@ -539,7 +531,7 @@ mod tests {
     #[test]
     fn identity_recovery_and_group_operations() {
         // Create Alice with original identity
-        let mut alice_provider1 = Provider::new();
+        let mut alice_provider1 = Provider::create(None).unwrap();
         let alice1 = Identity::create(&alice_provider1, "alice", None)
             .map_err(js_error_to_string)
             .unwrap();
@@ -554,7 +546,7 @@ mod tests {
         let mut chess_club = Group::create_new(&alice_provider1, &alice1, "chess club");
 
         // Create Bob
-        let mut bob_provider = Provider::new();
+        let mut bob_provider = Provider::create(None).unwrap();
         let bob = Identity::create(&bob_provider, "bob", None)
             .map_err(js_error_to_string)
             .unwrap();
@@ -576,7 +568,7 @@ mod tests {
         let mut chess_club_bob = Group::native_join(&bob_provider, &add_msgs.welcome, ratchet_tree);
 
         // Simulate Alice recovering her identity from keypair
-        let alice_provider2 = Provider::new();
+        let alice_provider2 = Provider::create(None).unwrap();
         let alice2 = Identity::create(&alice_provider2, "alice", Some(alice_keypair_bytes))
             .map_err(js_error_to_string)
             .unwrap();
